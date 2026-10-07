@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Drawing – Lord Hanuman</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;height:100dvh;background:#000;color:#fff;font-family:Georgia,"Times New Roman",serif;overflow:hidden}
+body{display:flex;flex-direction:column;align-items:center;padding:calc(12px + env(safe-area-inset-top,0px)) 12px calc(10px + env(safe-area-inset-bottom,0px))}
+body>*:not(#fx){position:relative;z-index:1}
+#fx{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.rule{display:flex;align-items:center;justify-content:center;gap:16px;width:min(70vw,420px)}
+.rule i{flex:1;height:1px;background:linear-gradient(90deg,transparent,#aaa)}
+.rule i:last-child{background:linear-gradient(270deg,transparent,#aaa)}
+.om{font-size:30px;line-height:1}
+h1{margin:6px 0 2px;font-weight:400;font-size:clamp(20px,3.4vw,38px);text-align:center}
+.sub{color:#999;font-size:11px;letter-spacing:4px;margin-bottom:10px;text-align:center}
+.frame{flex:1;min-height:0;width:min(100%,1180px);border:1px solid #444;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.paper{position:relative}
+canvas#c,canvas#p{display:block;width:100%;height:100%}
+canvas#p{position:absolute;left:0;top:0}
+canvas#c{position:relative;transition:filter 1s}
+#pencil{position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0;transition:opacity .6s;will-change:transform}
+.foot{width:100%;display:flex;flex-direction:column;align-items:center;margin-top:8px;font-size:14px;letter-spacing:3px;color:#ddd}
+.foot .rule{width:180px}
+.btns{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-bottom:6px;letter-spacing:0}
+button{background:rgba(0,0,0,.7);color:#fff;border:1px solid #777;border-radius:20px;padding:7px 14px;font:13px Georgia,serif;cursor:pointer}
+button:hover{background:#fff;color:#000}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="rule"><i></i><span class="om">ॐ</span><i></i></div>
+<h1>Live Drawing – Lord Hanuman</h1>
+<div class="sub">Watch the divine form come to life...</div>
+
+<div class="frame" id="frame">
+  <div class="paper" id="paper">
+    <canvas id="p"></canvas>
+    <canvas id="c"></canvas>
+    <svg id="pencil" width="380" height="40" viewBox="0 0 380 40">
+      <defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#555"/><stop offset=".5" stop-color="#222"/><stop offset="1" stop-color="#0c0c0c"/></linearGradient></defs>
+      <polygon points="0,20 60,9 60,31" fill="#d9bf98"/>
+      <polygon points="0,20 14,17.5 14,22.5" fill="#222"/>
+      <rect x="60" y="8" width="320" height="24" rx="3" fill="url(#b)"/>
+      <rect x="60" y="11" width="320" height="2" fill="#777" opacity=".5"/>
+    </svg>
+  </div>
+</div>
+
+<div class="foot">
+  <div class="btns">
+    <button id="pauseBtn">⏸ Pause</button>
+    <button id="speedBtn">Speed: Slow</button>
+    <button id="themeBtn">Colour: Lively</button>
+    <button id="upBtn">📷 Your Photo</button>
+    <button id="dlBtn">⬇ Save PNG</button>
+    <button id="musicBtn" style="display:none">♪ Music</button>
+    <button id="again">↻ Draw Again</button>
+  </div>
+  <div>|| Jai Shree Ram ||</div>
+  <div class="rule"><i></i><span class="om" style="font-size:18px">ॐ</span><i></i></div>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+<!-- Optional: put a file named music.mp3 in the same folder to enable the Music button -->
+<audio id="bgm" src="music.mp3" loop preload="none"></audio>
+
+<script src="sketch.js"></script>
+<script>
+const DURATIONS=[40,20,8], LABELS=["Slow","Normal","Fast"];
+const THEMES=[{n:"Lively",c:[255,244,220],paint:1},{n:"White",c:[255,255,255]},{n:"Gold",c:[255,200,90]},{n:"Saffron",c:[255,135,45]}];
+let speed=0, theme=0, paused=false, paintSrc=null;
+
+const $=id=>document.getElementById(id);
+const canvas=$("c"), ctx=canvas.getContext("2d",{willReadFrequently:true});
+const pc=$("p"), pctx=pc.getContext("2d"), maskC=document.createElement("canvas"), mctx=maskC.getContext("2d");
+const paper=$("paper"), frame=$("frame"), pencil=$("pencil");
+let W,H,gray,outData,path,prog=0,drawnTo=0,raf,scale=1,runId=0,lastX=0,lastY=0,lastT=null;
+
+/* ---------- load built-in sketch ---------- */
+const img=new Image();
+img.onload=()=>{
+  const t=document.createElement("canvas"); t.width=img.naturalWidth; t.height=img.naturalHeight;
+  const tc=t.getContext("2d"); tc.drawImage(img,0,0);
+  const d=tc.getImageData(0,0,t.width,t.height).data, g=new Uint8Array(t.width*t.height);
+  for(let i=0;i<g.length;i++) g[i]=d[i*4];
+  const pi=new Image(); pi.onload=()=>{paintSrc=pi; setGray(g,t.width,t.height);}; pi.src=PAINT;
+};
+img.src=SRC;
+
+function setGray(g,w,h){
+  gray=g; W=canvas.width=pc.width=w; H=canvas.height=pc.height=h;
+  canvas.style.filter="none";
+  buildPath(); fit(); start();
+}
+
+/* ---------- your own photo -> edge sketch ---------- */
+$("upBtn").onclick=()=>$("file").click();
+$("file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const im=new Image(), url=URL.createObjectURL(f);
+  im.onload=()=>{
+    const m=Math.min(1,760/Math.max(im.width,im.height));
+    const w=Math.round(im.width*m), h=Math.round(im.height*m);
+    const t=document.createElement("canvas"); t.width=w; t.height=h;
+    const tc=t.getContext("2d"); tc.drawImage(im,0,0,w,h);
+    const d=tc.getImageData(0,0,w,h).data, a=new Float32Array(w*h);
+    for(let i=0;i<w*h;i++) a[i]=.3*d[i*4]+.59*d[i*4+1]+.11*d[i*4+2];
+    const b=new Float32Array(w*h);                       // 3x3 blur
+    for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){let s=0;
+      for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++) s+=a[(y+j)*w+x+i]; b[y*w+x]=s/9;}
+    const mag=new Float32Array(w*h); let mx=0;           // Sobel edges
+    for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const p=y*w+x;
+      const gx=-b[p-w-1]-2*b[p-1]-b[p+w-1]+b[p-w+1]+2*b[p+1]+b[p+w+1];
+      const gy=-b[p-w-1]-2*b[p-w]-b[p-w+1]+b[p+w-1]+2*b[p+w]+b[p+w+1];
+      const v=Math.hypot(gx,gy); mag[p]=v; if(v>mx) mx=v;}
+    const g=new Uint8Array(w*h);
+    for(let i=0;i<g.length;i++) g[i]=Math.min(255,mag[i]/mx*255*3);
+    paintSrc=t; URL.revokeObjectURL(url); setGray(g,w,h);
+  };
+  im.src=url; e.target.value="";
+};
+
+/* ---------- pencil walk over bright lines ---------- */
+function buildPath(){
+  const INK=70, vis=new Uint8Array(W*H), pts=[];
+  const ink=(x,y)=>x>=0&&y>=0&&x<W&&y<H&&gray[y*W+x]>INK&&!vis[y*W+x];
+  let scan=0;
+  const nextScan=()=>{while(scan<W*H&&!(gray[scan]>INK&&!vis[scan]))scan++;return scan<W*H?scan:-1;};
+  function nearest(x,y,R){
+    for(let r=3;r<=R;r++){
+      let best=null,bd=1e9;
+      for(let dx=-r;dx<=r;dx++){
+        const step=Math.abs(dx)===r?1:2*r;
+        for(let dy=-r;dy<=r;dy+=step){
+          const nx=x+dx,ny=y+dy;
+          if(ink(nx,ny)){const dd=dx*dx+dy*dy;if(dd<bd){bd=dd;best=[nx,ny];}}
+        }
+      }
+      if(best) return best;
+    }
+    return null;
+  }
+  const mark=(x,y)=>{for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    const nx=x+dx,ny=y+dy;if(nx>=0&&ny>=0&&nx<W&&ny<H)vis[ny*W+nx]=1;}};
+  const s=nextScan(); if(s<0){path=[0,0];return;}
+  let x=s%W,y=(s/W)|0,lx=0,ly=1;
+  for(;;){
+    mark(x,y); pts.push(x,y);
+    let best=null,bs=1e9;
+    for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){
+      if((!dx&&!dy)||!ink(x+dx,y+dy)) continue;
+      const dist=Math.hypot(dx,dy), cos=(dx*lx+dy*ly)/dist/Math.hypot(lx,ly), sc=dist-cos*.8;
+      if(sc<bs){bs=sc;best=[x+dx,y+dy];}
+    }
+    if(!best) best=nearest(x,y,70);
+    if(!best){const k=nextScan();if(k<0)break;best=[k%W,(k/W)|0];}
+    lx=best[0]-x||lx; ly=best[1]-y||ly;
+    if(Math.hypot(best[0]-x,best[1]-y)>4){lx=0;ly=1;}
+    x=best[0]; y=best[1];
+  }
+  path=pts;
+}
+
+/* ---------- layout ---------- */
+function fit(){
+  if(!W) return;
+  scale=Math.min((frame.clientWidth-16)/W,(frame.clientHeight-16)/H);
+  paper.style.width=W*scale+"px"; paper.style.height=H*scale+"px";
+}
+addEventListener("resize",()=>{fit();placePencil(lastX,lastY);});
+function placePencil(x,y){
+  pencil.style.transform=`translate(${x*scale}px,${y*scale}px) rotate(-26deg) translate(0,-20px) scale(${scale*.85})`;
+}
+
+/* ---------- drawing animation ---------- */
+function put(i,v){
+  const c=THEMES[theme].c,o=i*4,d=outData.data;
+  d[o]=v*c[0]/255; d[o+1]=v*c[1]/255; d[o+2]=v*c[2]/255; d[o+3]=Math.min(255,v*3);
+}
+function reveal(x,y){
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+    const nx=x+dx,ny=y+dy; if(nx>=0&&ny>=0&&nx<W&&ny<H){const i=ny*W+nx;put(i,gray[i]);}
+  }
+}
+function start(){
+  cancelAnimationFrame(raf); runId++;
+  prog=0; drawnTo=0; bloomed=0; lastT=null; paused=false; $("pauseBtn").textContent="⏸ Pause";
+  canvas.style.filter="none";
+  outData=ctx.createImageData(W,H); ctx.putImageData(outData,0,0);
+  maskC.width=W; maskC.height=H; pctx.clearRect(0,0,W,H);
+  pencil.style.opacity=1; placePencil(path[0],path[1]);
+  raf=requestAnimationFrame(tick);
+}
+function tick(t){
+  if(lastT===null) lastT=t;
+  if(!paused) prog+=(t-lastT)/1000/DURATIONS[speed];
+  lastT=t;
+  const total=path.length/2, n=Math.min(total,Math.floor(prog*total));
+  for(let i=drawnTo;i<n;i++) reveal(path[i*2],path[i*2+1]);
+  if(n>drawnTo){
+    drawnTo=n; ctx.putImageData(outData,0,0);
+    lastX=path[(n-1)*2]; lastY=path[(n-1)*2+1]; placePencil(lastX,lastY);
+    if(THEMES[theme].paint) bloom(n);
+  }
+  if(n<total) raf=requestAnimationFrame(tick); else finish();
+}
+let bloomed=0;
+function bloom(n){
+  for(let i=Math.max(bloomed,drawnTo-400);i<n;i+=3){
+    const x=path[i*2],y=path[i*2+1],g=mctx.createRadialGradient(x,y,0,x,y,26);
+    g.addColorStop(0,"rgba(255,255,255,.55)"); g.addColorStop(1,"rgba(255,255,255,0)");
+    mctx.fillStyle=g; mctx.fillRect(x-26,y-26,52,52);
+  }
+  bloomed=n; renderPaint(0);
+}
+function renderPaint(a){
+  pctx.globalCompositeOperation="source-over"; pctx.clearRect(0,0,W,H);
+  pctx.drawImage(paintSrc,0,0,W,H);
+  pctx.globalCompositeOperation="destination-in"; pctx.drawImage(maskC,0,0);
+  pctx.globalCompositeOperation="source-over";
+  if(a>0){ const m=document.createElement("canvas");m.width=W;m.height=H;
+    m.getContext("2d").drawImage(pc,0,0); pctx.clearRect(0,0,W,H);
+    pctx.drawImage(m,0,0); pctx.globalAlpha=a; pctx.drawImage(paintSrc,0,0,W,H); pctx.globalAlpha=1; }
+}
+function finish(){
+  const id=runId, full=document.createElement("canvas"); full.width=W; full.height=H;
+  const fd=ctx.createImageData(W,H), keep=outData; outData=fd;
+  for(let i=0;i<W*H;i++) put(i,gray[i]);
+  outData=keep; full.getContext("2d").putImageData(fd,0,0);
+  const base=document.createElement("canvas"); base.width=W; base.height=H;
+  base.getContext("2d").putImageData(outData,0,0);
+  pencil.style.opacity=0;
+  const c=THEMES[theme].c, s=performance.now(), usePaint=!!THEMES[theme].paint;
+  const pm=document.createElement("canvas"); pm.width=W; pm.height=H;
+  if(usePaint){ renderPaint(0); pm.getContext("2d").drawImage(pc,0,0); }
+  (function f(now){
+    if(id!==runId) return;
+    const a=Math.min(1,(now-s)/1200);
+    ctx.clearRect(0,0,W,H); ctx.globalAlpha=1; ctx.drawImage(base,0,0);
+    ctx.globalAlpha=a; ctx.drawImage(full,0,0); ctx.globalAlpha=1;
+    if(usePaint){ pctx.clearRect(0,0,W,H); pctx.drawImage(pm,0,0); pctx.globalAlpha=a; pctx.drawImage(paintSrc,0,0,W,H); pctx.globalAlpha=1; }
+    if(a<1) requestAnimationFrame(f);
+    else canvas.style.filter=`drop-shadow(0 0 5px rgba(${c[0]},${c[1]},${c[2]},.55))`;  // glow
+  })(s);
+}
+
+/* ---------- buttons ---------- */
+$("again").onclick=()=>{if(path) start();};
+$("pauseBtn").onclick=function(){paused=!paused;this.textContent=paused?"▶ Resume":"⏸ Pause";};
+$("speedBtn").onclick=function(){speed=(speed+1)%3;this.textContent="Speed: "+LABELS[speed];};
+$("themeBtn").onclick=function(){theme=(theme+1)%4;this.textContent="Colour: "+THEMES[theme].n;if(path)start();};
+$("dlBtn").onclick=()=>{
+  const o=document.createElement("canvas"); o.width=W; o.height=H;
+  const oc=o.getContext("2d"); oc.fillStyle="#000"; oc.fillRect(0,0,W,H); oc.drawImage(pc,0,0); oc.drawImage(canvas,0,0);
+  o.toBlob(b=>{const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="hanuman-drawing.png";a.click();});
+};
+const bgm=$("bgm");
+bgm.addEventListener("loadedmetadata",()=>{$("musicBtn").style.display=""});
+bgm.load();
+$("musicBtn").onclick=function(){
+  if(bgm.paused){bgm.play();this.textContent="♪ Mute";} else {bgm.pause();this.textContent="♪ Music";}
+};
+
+/* ---------- floating embers ---------- */
+const fx=$("fx"), fc=fx.getContext("2d"); let P=[];
+function fxSize(){fx.width=innerWidth;fx.height=innerHeight;}
+addEventListener("resize",fxSize); fxSize();
+for(let i=0;i<45;i++) P.push({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*1.8+.4,v:Math.random()*.5+.15,p:Math.random()*6});
+(function loop(t){
+  fc.clearRect(0,0,fx.width,fx.height);
+  const c=THEMES[theme].paint?[255,190,80]:THEMES[theme].c;
+  for(const q of P){
+    q.y-=q.v; q.x+=Math.sin(t/1500+q.p)*.3;
+    if(q.y<-5){q.y=fx.height+5;q.x=Math.random()*fx.width;}
+    fc.beginPath(); fc.arc(q.x,q.y,q.r,0,6.283);
+    fc.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},${.25+.25*Math.sin(t/700+q.p)})`; fc.fill();
+  }
+  requestAnimationFrame(loop);
+})(0);
+</script>
+</body>
+</html>
